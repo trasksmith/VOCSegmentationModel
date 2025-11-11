@@ -66,7 +66,17 @@ class MobileNetV3_ASPP_Seg(nn.Module):
         # Three skip connections: low, mid, higher
         # -------------------------
         self.skip_layers = [2, 4, 6]  # low, mid, higher level
-        self.skip_channels = [self.encoder[i].out_channels for i in self.skip_layers]
+        self.skip_channels = []
+        for i in self.skip_layers:
+            layer = self.encoder[i]
+            if hasattr(layer, 'out_channels'):
+                self.skip_channels.append(layer.out_channels)
+            else:
+                # For InvertedResidual blocks, get the last conv's out_channels
+                for module in reversed(list(layer.modules())):
+                    if hasattr(module, 'out_channels'):
+                        self.skip_channels.append(module.out_channels)
+                        break
 
         self.skip_convs = nn.ModuleList([
             nn.Sequential(
@@ -107,10 +117,22 @@ class MobileNetV3_ASPP_Seg(nn.Module):
         self.classifier = nn.Conv2d(64, num_classes, 1)
 
         self.feature_proj = nn.ModuleDict({
-            'low': nn.Conv2d(self.skip_channels[0], 256, 1, bias=False),
-            'mid': nn.Conv2d(self.skip_channels[1], 512, 1, bias=False),
-            'high': nn.Conv2d(self.skip_channels[2], 1024, 1, bias=False),
-            'aspp': nn.Conv2d(self.aspp.project[0].out_channels, 2048, 1, bias=False)
+            'low': nn.Sequential(
+                nn.Conv2d(64, 256, 1, bias=False),  # 64 -> 256
+                nn.BatchNorm2d(256)
+            ),
+            'mid': nn.Sequential(
+                nn.Conv2d(64, 512, 1, bias=False),  # 64 -> 512
+                nn.BatchNorm2d(512)
+            ),
+            'high': nn.Sequential(
+                nn.Conv2d(64, 1024, 1, bias=False),  # 64 -> 1024
+                nn.BatchNorm2d(1024)
+            ),
+            'aspp': nn.Sequential(
+                nn.Conv2d(aspp_out, 2048, 1, bias=False),  # 256 -> 2048
+                nn.BatchNorm2d(2048)
+            )
         })
 
     def forward(self, x, return_features=False):
