@@ -53,7 +53,7 @@ class ASPP(nn.Module):
         return self.project(out)
 
 # ---------------------------
-# MobileNetV3-small ASPP + improved decoder
+# MobileNetV3-small ASPP + improved decoder + 3 skips
 # ---------------------------
 class MobileNetV3_ASPP_Seg(nn.Module):
     def __init__(self, num_classes=21, aspp_out=256):
@@ -62,9 +62,9 @@ class MobileNetV3_ASPP_Seg(nn.Module):
         self.encoder = backbone.features
 
         # -------------------------
-        # Multi-level skip connections (low + mid)
+        # Three skip connections: low, mid, higher
         # -------------------------
-        self.skip_layers = [2, 4]  # low-level + mid-level
+        self.skip_layers = [2, 4, 6]  # low, mid, higher level
         self.skip_channels = [self.encoder[i].out_channels for i in self.skip_layers]
 
         self.skip_convs = nn.ModuleList([
