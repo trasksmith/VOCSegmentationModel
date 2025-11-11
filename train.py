@@ -7,10 +7,11 @@ from torchvision.datasets import VOCSegmentation
 import matplotlib.pyplot as plt
 import numpy as np
 from torchvision.models.segmentation import fcn_resnet50
+import torch.nn.functional as F
 import datetime
 from model import MobileNetV3_ASPP_Seg
 import random
-import torchvision.transforms.functional as F
+import torchvision.transforms.functional as T
 
 # Default hyperparameters
 n_epochs = 30
@@ -22,23 +23,23 @@ def augment(image, mask,
                       flip_prob=0.5,
                       crop_size=(224, 224)):
     # Convert from PIL to tensor first
-    image = F.to_tensor(image)
+    image = T.to_tensor(image)
     mask = torch.as_tensor(np.array(mask), dtype=torch.long)
 
     # Resize first for consistent shape
-    image = F.resize(image, (256, 256))
-    mask = F.resize(mask.unsqueeze(0).float(), (256, 256),
-                    interpolation=F.InterpolationMode.NEAREST).squeeze(0).long()
+    image = T.resize(image, (256, 256))
+    mask = T.resize(mask.unsqueeze(0).float(), (256, 256),
+                    interpolation=T.InterpolationMode.NEAREST).squeeze(0).long()
 
     # Random horizontal flip
     if random.random() < flip_prob:
-        image = F.hflip(image)
-        mask = F.hflip(mask)
+        image = T.hflip(image)
+        mask = T.hflip(mask)
 
     # Random crop
     i, j, h, w = transforms.RandomCrop.get_params(image, output_size=crop_size)
-    image = F.crop(image, i, j, h, w)
-    mask = F.crop(mask, i, j, h, w)
+    image = T.crop(image, i, j, h, w)
+    mask = T.crop(mask, i, j, h, w)
 
     # Random color jitter (applied only to image)
     if random.random() < 0.6:
@@ -48,10 +49,38 @@ def augment(image, mask,
 
 
     # Normalize
-    image = F.normalize(image, mean=[0.485, 0.456, 0.406],
+    image = T.normalize(image, mean=[0.485, 0.456, 0.406],
                         std=[0.229, 0.224, 0.225])
 
     return image, mask
+
+
+def voc_distillation_loss(student_model, teacher_model, images, masks, criterion, temperature=2.0, alpha=0.5,
+                          ignore_index=255):
+
+    student_model.train()
+    teacher_model.eval()
+
+    with torch.no_grad():
+        teacher_outputs = teacher_model(images)['out']  # (B, 21, H, W)
+
+    student_outputs = student_model(images)  # (B, 21, H, W)
+
+    mask = masks != ignore_index  # (B, H, W)
+    student_flat = student_outputs.permute(0, 2, 3, 1)[mask]  # (N_valid, 21)
+    teacher_flat = teacher_outputs.permute(0, 2, 3, 1)[mask]  # (N_valid, 21)
+    mask_flat = masks[mask]  # (N_valid,)
+
+    # Hard label loss
+    hard_loss = alpha * criterion(student_flat, mask_flat)
+
+    # Soft label KD loss
+    t_soft = F.softmax(teacher_flat / temperature, dim=1)
+    s_log_soft = F.log_softmax(student_flat / temperature, dim=1)
+    kd_loss = (1 - alpha) * F.kl_div(s_log_soft, t_soft, reduction='batchmean') * (temperature ** 2)
+
+    loss = hard_loss + kd_loss
+    return loss
 
 class VOCDataset(torch.utils.data.Dataset):
     def __init__(self, root, image_set, augment=True):
@@ -64,11 +93,11 @@ class VOCDataset(torch.utils.data.Dataset):
         if self.augment:
             image, mask = augment(image, mask)
         else:
-            image = F.to_tensor(image)
-            image = F.resize(image, (256, 256))
-            image = F.normalize(image, mean=[0.485, 0.456, 0.406],
+            image = T.to_tensor(image)
+            image = T.resize(image, (256, 256))
+            image = T.normalize(image, mean=[0.485, 0.456, 0.406],
                                 std=[0.229, 0.224, 0.225])
-            mask = F.resize(mask, (256, 256), interpolation=F.InterpolationMode.NEAREST)
+            mask = T.resize(mask, (256, 256), interpolation=T.InterpolationMode.NEAREST)
             mask = torch.as_tensor(np.array(mask), dtype=torch.long)
 
         return image, mask
@@ -98,13 +127,13 @@ def train(student_model, teacher_model, train_loader, val_loader, optimizer, cri
 
             optimizer.zero_grad()
 
-            #if use_response_KD:
-            #    loss = 0 #Ignore for now
-            #elif use_feature_KD:
-            #    loss = 0 #Ignore for now
-            #else:
-            outputs = student_model(imgs)
-            loss = criterion(outputs, masks)
+            if 1:
+                loss = voc_distillation_loss(student_model, teacher_model, imgs, masks, criterion)
+            elif 0:
+                loss = 0 #Ignore for now
+            else:
+                outputs = student_model(imgs)
+                loss = criterion(outputs, masks)
 
             loss.backward()
             optimizer.step()
