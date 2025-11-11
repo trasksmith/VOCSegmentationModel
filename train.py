@@ -12,7 +12,7 @@ import datetime
 from model import MobileNetV3_ASPP_Seg
 import random
 import torchvision.transforms.functional as T
-from torchmetrics.segmentation import MeanIoU
+import argparse
 
 # Default hyperparameters
 n_epochs = 25
@@ -56,7 +56,7 @@ def augment(image, mask,
     return image, mask
 
 
-def voc_distillation_loss(student_model, teacher_model, images, masks, criterion, temperature=3.0, alpha=0.6,
+def voc_response_distillation_loss(student_model, teacher_model, images, masks, criterion, temperature=3.0, alpha=0.6,
                           ignore_index=255):
 
     student_model.train()
@@ -83,15 +83,62 @@ def voc_distillation_loss(student_model, teacher_model, images, masks, criterion
     loss = hard_loss + kd_loss
     return loss, student_outputs
 
+def voc_feature_distillation_loss(student_model, teacher_model, images, masks,
+                                  criterion, alpha=0.6, beta=50.0, ignore_index=255):
+
+    student_model.train()
+    teacher_model.eval()
+
+    with torch.no_grad():
+        teacher_features = teacher_model.backbone(images)
+
+    student_outputs, students_features = student_model(images, return_features=True)
+
+    # ---------- Hard label loss ----------
+    mask = masks != ignore_index
+    student_flat = student_outputs.permute(0, 2, 3, 1)[mask]
+    hard_loss = alpha * criterion(student_flat, masks[mask])
+
+    # ---------- Feature KD loss ----------
+    # (Pair student features with corresponding teacher layers)
+    layer_pairs = [
+        ('low', 'layer1'),
+        ('mid', 'layer2'),
+        ('high', 'layer3'),
+        ('aspp', 'layer4')
+    ]
+    feat_loss = 0.0
+    for s_key, t_key in layer_pairs:
+        s_feat = students_features[s_key]
+        t_feat = teacher_features[t_key]
+
+        # Resize to match
+        s_feat = F.interpolate(s_feat, size=t_feat.shape[-2:], mode='bilinear', align_corners=False)
+
+        # Match channels if necessary (temporary 1x1 projection)
+        s_feat = student_model.feature_proj[s_key](s_feat)
+
+        # Normalize before comparing
+        s_norm = F.normalize(s_feat, p=2, dim=1)
+        t_norm = F.normalize(t_feat, p=2, dim=1)
+        cos_loss = 1 - F.cosine_similarity(s_norm, t_norm, dim=1).mean()
+
+        feat_loss += cos_loss
+
+    feat_loss = beta * feat_loss / len(layer_pairs)
+
+    total_loss = hard_loss + feat_loss
+    return total_loss, student_outputs
+
 class VOCDataset(torch.utils.data.Dataset):
-    def __init__(self, root, image_set, augment=True):
+    def __init__(self, root, image_set, do_augment =True):
         self.dataset = VOCSegmentation(root=root, year="2012", image_set=image_set)
-        self.augment = augment
+        self.do_augment  = augment
 
     def __getitem__(self, idx):
         image, mask = self.dataset[idx]
 
-        if self.augment:
+        if self.do_augment :
             image, mask = augment(image, mask)
         else:
             image = T.to_tensor(image)
@@ -107,7 +154,7 @@ class VOCDataset(torch.utils.data.Dataset):
         return len(self.dataset)
 
 def train(student_model, teacher_model, train_loader, val_loader, optimizer, criterion, scheduler, train_miou, val_miou, device, save_file,
-          loss_plot_file, miou_plot_file):
+          loss_plot_file, miou_plot_file, mode):
     print('Starting training...')
 
     train_losses, val_losses = [], []
@@ -128,10 +175,10 @@ def train(student_model, teacher_model, train_loader, val_loader, optimizer, cri
 
             optimizer.zero_grad()
 
-            if 1:
-                loss, outputs = voc_distillation_loss(student_model, teacher_model, imgs, masks, criterion)
-            elif 0:
-                loss = 0 #Ignore for now
+            if mode == "response":
+                loss, outputs = voc_response_distillation_loss(student_model, teacher_model, imgs, masks, criterion)
+            elif mode == "feature":
+                loss, outputs = voc_feature_distillation_loss(student_model, teacher_model, imgs, masks, criterion)
             else:
                 outputs = student_model(imgs)
                 loss = criterion(outputs, masks)
@@ -213,6 +260,16 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print('Using device:', device)
 
+    argParser = argparse.ArgumentParser()
+    argParser.add_argument('-m', metavar='state', type=str, default="None", help='Mode for KD')
+    args = argParser.parse_args()
+
+    if args.m not in ["response", "feature", "None"]:
+        raise ValueError(f"Invalid KD mode: {args.m}. Must be 'response', 'feature', or 'None'.")
+    else:
+        mode = args.m
+
+
     save_file = 'weights_7.pth'
     loss_plot_file = 'loss_plot_7.png'
     miou_plot_file = 'miou_plot_7.png'
@@ -229,13 +286,13 @@ def main():
     train_dataset = VOCDataset(
         root="./VOC2012_train_val/",
         image_set="train",
-        augment=True
+        do_augment=True
     )
 
     val_dataset = VOCDataset(
         root="./VOC2012_train_val/",
         image_set="val",
-        augment=False
+        do_augment=False
     )
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -250,7 +307,7 @@ def main():
     val_miou = torchmetrics.JaccardIndex(task="multiclass", num_classes=num_classes, ignore_index=255).to(device)
 
     train(student_model, teacher_model, train_loader, val_loader, optimizer, criterion, scheduler, train_miou, val_miou, device, save_file,
-          loss_plot_file, miou_plot_file)
+          loss_plot_file, miou_plot_file, mode)
 
 if __name__ == '__main__':
     main()

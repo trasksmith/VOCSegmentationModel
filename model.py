@@ -106,7 +106,14 @@ class MobileNetV3_ASPP_Seg(nn.Module):
         self.dropout = nn.Dropout2d(0.3)
         self.classifier = nn.Conv2d(64, num_classes, 1)
 
-    def forward(self, x):
+        self.feature_proj = nn.ModuleDict({
+            'low': nn.Conv2d(self.skip_channels[0], 256, 1, bias=False),
+            'mid': nn.Conv2d(self.skip_channels[1], 512, 1, bias=False),
+            'high': nn.Conv2d(self.skip_channels[2], 1024, 1, bias=False),
+            'aspp': nn.Conv2d(self.aspp.project[0].out_channels, 2048, 1, bias=False)
+        })
+
+    def forward(self, x, return_features=False):
         input_size = x.shape[-2:]
         out = x
         skip_feats = []
@@ -120,6 +127,7 @@ class MobileNetV3_ASPP_Seg(nn.Module):
 
         # ASPP
         x = self.aspp(out)
+        high_feat = x  # feature for KD
 
         # Progressive upsampling and concatenation of skip features
         for feat in skip_feats[::-1]:  # deep -> shallow
@@ -135,6 +143,16 @@ class MobileNetV3_ASPP_Seg(nn.Module):
         x = self.dropout(x)
         x = F.interpolate(x, size=input_size, mode='bilinear', align_corners=False)
         logits = self.classifier(x)
+
+        if return_features:
+            # return logits + chosen internal features
+            return logits, {
+                'low': skip_feats[0],
+                'mid': skip_feats[1],
+                'high': skip_feats[2],
+                'aspp': high_feat
+            }
+
         return logits
 
 # ---------------------------
@@ -149,139 +167,3 @@ if __name__ == '__main__':
     print('Output shape:', out.shape)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f'Trainable params: {n_params:,}')
-
-
-'''
-class ASPP(nn.Module):
-    """Atrous Spatial Pyramid Pooling (lightweight variant).
-    Produces a fixed number of output channels.
-    """
-
-    def __init__(self, in_channels, out_channels=256, dilations=(1, 6, 12, 18)):
-        super().__init__()
-        self.branches = nn.ModuleList()
-
-        # 1x1 conv branch
-        self.branches.append(nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
-        ))
-
-        # atrous conv branches
-        for d in dilations[1:]:
-            self.branches.append(nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=d, dilation=d, bias=False),
-                nn.BatchNorm2d(out_channels),
-                nn.ReLU(inplace=True)
-            ))
-
-        # image pooling branch
-        self.image_pool = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
-        )
-
-        # final projection
-        n_branches = len(self.branches) + 1
-        self.project = nn.Sequential(
-            nn.Conv2d(out_channels * n_branches, out_channels, kernel_size=1, bias=False),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.Dropout2d(0.1)
-        )
-
-    def forward(self, x):
-        size = x.shape[-2:]
-        out = []
-        for b in self.branches:
-            out.append(b(x))
-        img = self.image_pool(x)
-        img = F.interpolate(img, size=size, mode='bilinear', align_corners=False)
-        out.append(img)
-        out = torch.cat(out, dim=1)
-        return self.project(out)
-
-
-class MobileNetV3_ASPP_Seg(nn.Module):
-    """Segmentation model using MobileNetV3 small as encoder + ASPP + simple decoder.
-
-    - backbone_pretrained: use torchvision pretrained MobileNetV3 weights if True
-    - num_classes: number of segmentation classes
-    - aspp_out: internal channel size for ASPP
-    """
-
-    def __init__(self, num_classes=21, aspp_out=256):
-        super().__init__()
-        # Load backbone
-        backbone = models.mobilenet_v3_small(pretrained=True)
-        # We will use backbone.features as encoder
-        self.encoder = backbone.features
-
-        # find backbone output channels (last conv in features)
-        backbone_out_channels = None
-        for module in reversed(self.encoder):
-            if hasattr(module, 'out_channels'):
-                backbone_out_channels = module.out_channels
-                break
-        if backbone_out_channels is None:
-            # fallback
-            backbone_out_channels = 576
-
-        # ASPP
-        self.aspp = ASPP(backbone_out_channels, out_channels=aspp_out)
-
-        # Simple decoder: reduce and upsample
-        self.decoder_conv = nn.Sequential(
-            nn.Conv2d(aspp_out, aspp_out // 2, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(aspp_out // 2),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(aspp_out // 2, aspp_out // 2, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(aspp_out // 2),
-            nn.ReLU(inplace=True)
-        )
-
-        # Dropout before classifier head
-        self.dropout = nn.Dropout2d(0.3)
-
-        self.classifier = nn.Conv2d(aspp_out // 2, num_classes, kernel_size=1)
-
-    def forward(self, x):
-        input_size = x.shape[-2:]
-
-        # Encoder forward: pass through backbone.features
-        feats = self.encoder(x)
-        # backbone.features returns activation of last layer
-
-        # ASPP
-        x = self.aspp(feats)
-
-        # Decoder conv
-        x = self.decoder_conv(x)
-
-        # Dropout before classifier
-        x = self.dropout(x)
-
-        # Upsample to input size using bilinear interpolation
-        x = F.interpolate(x, size=input_size, mode='bilinear', align_corners=False)
-
-        logits = self.classifier(x)
-        return logits
-'''
-r'''
-if __name__ == '__main__':
-    # quick smoke test
-    model = MobileNetV3_ASPP_Seg(num_classes=21)
-    model.eval()
-
-    dummy = torch.randn(2, 3, 224, 224)
-    with torch.no_grad():
-        out = model(dummy)
-    print('Output shape:', out.shape)  # expected [2, num_classes, 224, 224]
-
-    # Count params
-    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f'Trainable params: {n_params:,}')
-'''

@@ -25,8 +25,10 @@ def evaluate(loader, model):
             print(f"Updating mIoU for batch {idx}...")  # <- DEBUG PRINT
             miou.update(preds, targets)
 
+    total_params = sum(p.numel() for p in model.parameters())
     mean_iou = miou.compute()
     print(f"Mean IoU: {mean_iou.item():.4f}")
+
     miou.reset()
 
 if __name__ == "__main__":
