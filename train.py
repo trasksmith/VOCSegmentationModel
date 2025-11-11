@@ -7,20 +7,20 @@ from torchvision.datasets import VOCSegmentation
 import matplotlib.pyplot as plt
 import numpy as np
 from torchvision.models.segmentation import fcn_resnet50
-
+import datetime
 from model import MobileNetV3_ASPP_Seg
 import random
 import torchvision.transforms.functional as F
 
 # Default hyperparameters
-n_epochs = 20
+n_epochs = 30
 batch_size = 16
 learning_rate = 1e-4
 num_classes = 21
 
 def augment(image, mask,
                       flip_prob=0.5,
-                      crop_size=(240, 240)):
+                      crop_size=(224, 224)):
     # Convert from PIL to tensor first
     image = F.to_tensor(image)
     mask = torch.as_tensor(np.array(mask), dtype=torch.long)
@@ -86,7 +86,7 @@ def train(student_model, teacher_model, train_loader, val_loader, optimizer, cri
     teacher_model.eval()
 
     for epoch in range(n_epochs):
-        print(f"\nEpoch [{epoch + 1}/{n_epochs}]")
+        print(f"\n{datetime.datetime.now()}: Epoch [{epoch + 1}/{n_epochs}]")
         student_model.train()
         train_loss = 0.0
         train_miou.reset()
