@@ -13,6 +13,7 @@ from model import MobileNetV3_ASPP_Seg
 import random
 import torchvision.transforms.functional as T
 import argparse
+from torchvision.models._utils import IntermediateLayerGetter
 
 # Default hyperparameters
 n_epochs = 25
@@ -89,8 +90,17 @@ def voc_feature_distillation_loss(student_model, teacher_model, images, masks,
     student_model.train()
     teacher_model.eval()
 
+    return_layers = {
+        'layer1':'layer1',
+        'layer2':'layer2',
+        'layer3':'layer3',
+        'layer4':'layer4'
+    }
+
+    teacher_features_extractor = IntermediateLayerGetter(teacher_model.backbone, return_layers=return_layers)
+    
     with torch.no_grad():
-        teacher_features = teacher_model.backbone(images)
+        teacher_features = teacher_features_extractor(images)
 
     student_outputs, students_features = student_model(images, return_features=True)
 
