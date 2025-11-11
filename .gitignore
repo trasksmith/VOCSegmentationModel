@@ -1,0 +1,22 @@
+
+# --- Python --- 
+__pycache__/ 
+
+# --- Virtual environment --- 
+.venv/
+
+# --- IDE / Editor settings --- 
+
+.idea/ 
+
+# -- Loss Plots / Weights ---
+*.png
+*.pth
+
+# -- Dataset ---
+VOC2012_test/*
+VOC2012_train_val/VOCdevkit/VOC2012/Annotations/*
+VOC2012_train_val/VOCdevkit/VOC2012/SegmentationObject/*
+VOC2012_train_val/VOCdevkit/VOC2012/ImageSets/Action/*
+VOC2012_train_val/VOCdevkit/VOC2012/ImageSets/Layout/*
+VOC2012_train_val/VOCdevkit/VOC2012/ImageSets/Main/*
