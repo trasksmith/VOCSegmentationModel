@@ -15,6 +15,7 @@ __pycache__/
 
 # -- Dataset ---
 VOC2012_test/*
+VOC2012_train_val/*
 VOC2012_train_val/VOCdevkit/VOC2012/Annotations/*
 VOC2012_train_val/VOCdevkit/VOC2012/SegmentationObject/*
 VOC2012_train_val/VOCdevkit/VOC2012/ImageSets/Action/*
