@@ -12,23 +12,24 @@ import datetime
 from model import MobileNetV3_ASPP_Seg
 import random
 import torchvision.transforms.functional as T
+from torchmetrics.segmentation import MeanIoU
 
 # Default hyperparameters
-n_epochs = 30
+n_epochs = 25
 batch_size = 16
 learning_rate = 1e-4
 num_classes = 21
 
 def augment(image, mask,
                       flip_prob=0.5,
-                      crop_size=(224, 224)):
+                      crop_size=(448, 448)):
     # Convert from PIL to tensor first
     image = T.to_tensor(image)
     mask = torch.as_tensor(np.array(mask), dtype=torch.long)
 
     # Resize first for consistent shape
-    image = T.resize(image, (256, 256))
-    mask = T.resize(mask.unsqueeze(0).float(), (256, 256),
+    image = T.resize(image, (512, 512))
+    mask = T.resize(mask.unsqueeze(0).float(), (512, 512),
                     interpolation=T.InterpolationMode.NEAREST).squeeze(0).long()
 
     # Random horizontal flip
@@ -55,7 +56,7 @@ def augment(image, mask,
     return image, mask
 
 
-def voc_distillation_loss(student_model, teacher_model, images, masks, criterion, temperature=2.0, alpha=0.5,
+def voc_distillation_loss(student_model, teacher_model, images, masks, criterion, temperature=3.0, alpha=0.6,
                           ignore_index=255):
 
     student_model.train()
@@ -80,7 +81,7 @@ def voc_distillation_loss(student_model, teacher_model, images, masks, criterion
     kd_loss = (1 - alpha) * F.kl_div(s_log_soft, t_soft, reduction='batchmean') * (temperature ** 2)
 
     loss = hard_loss + kd_loss
-    return loss
+    return loss, student_outputs
 
 class VOCDataset(torch.utils.data.Dataset):
     def __init__(self, root, image_set, augment=True):
@@ -94,10 +95,10 @@ class VOCDataset(torch.utils.data.Dataset):
             image, mask = augment(image, mask)
         else:
             image = T.to_tensor(image)
-            image = T.resize(image, (256, 256))
+            image = T.resize(image, (448, 448))
             image = T.normalize(image, mean=[0.485, 0.456, 0.406],
                                 std=[0.229, 0.224, 0.225])
-            mask = T.resize(mask, (256, 256), interpolation=T.InterpolationMode.NEAREST)
+            mask = T.resize(mask, (448, 448), interpolation=T.InterpolationMode.NEAREST)
             mask = torch.as_tensor(np.array(mask), dtype=torch.long)
 
         return image, mask
@@ -128,7 +129,7 @@ def train(student_model, teacher_model, train_loader, val_loader, optimizer, cri
             optimizer.zero_grad()
 
             if 1:
-                loss = voc_distillation_loss(student_model, teacher_model, imgs, masks, criterion)
+                loss, outputs = voc_distillation_loss(student_model, teacher_model, imgs, masks, criterion)
             elif 0:
                 loss = 0 #Ignore for now
             else:
@@ -212,9 +213,9 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print('Using device:', device)
 
-    save_file = 'weights_5.pth'
-    loss_plot_file = 'loss_plot_5.png'
-    miou_plot_file = 'miou_plot_5.png'
+    save_file = 'weights_7.pth'
+    loss_plot_file = 'loss_plot_7.png'
+    miou_plot_file = 'miou_plot_7.png'
 
     print('Save File:', save_file)
     print('Loss Plot File:', loss_plot_file)

@@ -14,7 +14,7 @@ def main():
     print("Using device:", device)
 
     model = MobileNetV3_ASPP_Seg()
-    model.load_state_dict(torch.load('weights_3.pth', map_location=device, weights_only=False))
+    model.load_state_dict(torch.load('weights_5.pth', map_location=device, weights_only=False))
     model.to(device)
     model.eval()
 
