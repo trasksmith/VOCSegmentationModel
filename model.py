@@ -181,11 +181,9 @@ class MobileNetV3_ASPP_Seg(nn.Module):
 # Test
 # ---------------------------
 if __name__ == '__main__':
-    model = MobileNetV3_ASPP_Seg(num_classes=21)
-    model.eval()
+    model = MobileNetV3_ASPP_Seg()
     dummy = torch.randn(2, 3, 224, 224)
-    with torch.no_grad():
-        out = model(dummy)
-    print('Output shape:', out.shape)
-    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f'Trainable params: {n_params:,}')
+    out, feats = model(dummy, return_features=True)
+    for k, v in feats.items():
+        print(k, v.shape)
+    print("Output shape:", out.shape)

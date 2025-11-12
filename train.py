@@ -143,7 +143,7 @@ def voc_feature_distillation_loss(student_model, teacher_model, images, masks,
 class VOCDataset(torch.utils.data.Dataset):
     def __init__(self, root, image_set, do_augment =True):
         self.dataset = VOCSegmentation(root=root, year="2012", image_set=image_set)
-        self.do_augment  = augment
+        self.do_augment  = do_augment
 
     def __getitem__(self, idx):
         image, mask = self.dataset[idx]
